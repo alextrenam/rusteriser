@@ -14,6 +14,7 @@ struct Vec3 {
     z: f32,
 }
 
+#[derive(Copy, Clone)]
 struct IntVec2 {
     x: i32,
     y: i32,
@@ -22,8 +23,8 @@ struct IntVec2 {
 impl IntVec2 {
     pub fn from(vec: &Vec2) -> Self {
 	Self {
-	    x: (vec.x + 0.5).floor() as i32,
-	    y: (vec.y + 0.5).floor() as i32,
+	    x: vec.x.round() as i32,
+	    y: vec.y.round() as i32,
 	}
     }
 }
@@ -57,45 +58,45 @@ fn write_fragment(
     }
 }
 
-// fn draw_line(
-//     buffer: &mut [u32],
-//     x0: i32,
-//     y0: i32,
-//     x1: i32,
-//     y1: i32,
-//     colour: u32,
-// ) {
-//     let dx = (x1 - x0).abs();
-//     let dy = -(y1 - y0).abs();
+fn draw_line(
+    colour_buffer: &mut [u32],
+    depth_buffer: &mut [f32],
+    v0: IntVec2,
+    v1: IntVec2,
+    depth: f32,
+    colour: u32,
+) {
+    let dx = (v1.x - v0.x).abs();
+    let dy = -(v1.y - v0.y).abs();
 
-//     let sx = if x0 < x1 { 1 } else { -1 };
-//     let sy = if y0 < y1 { 1 } else { -1 };
+    // Parameterise the path
+    let sx = if v0.x < v1.x { 1 } else { -1 };
+    let sy = if v0.y < v1.y { 1 } else { -1 };
 
-//     let mut err = dx + dy;
+    let mut err = dx + dy;
+    let mut v = IntVec2{x: v0.x, y: v0.y};
 
-//     let mut x = x0;
-//     let mut y = y0;
+    loop {
+	let fragment = Fragment{position: v, depth: depth, colour: colour};
+        write_fragment(colour_buffer, depth_buffer, fragment);
 
-//     loop {
-//         set_pixel(buffer, x, y, colour);
+        if v.x == v1.x && v.y == v1.y {
+            break;
+        }
 
-//         if x == x1 && y == y1 {
-//             break;
-//         }
+        let e2 = 2 * err;
 
-//         let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            v.x += sx;
+        }
 
-//         if e2 >= dy {
-//             err += dy;
-//             x += sx;
-//         }
-
-//         if e2 <= dx {
-//             err += dx;
-//             y += sy;
-//         }
-//     }
-// }
+        if e2 <= dx {
+            err += dx;
+            v.y += sy;
+        }
+    }
+}
 
 // fn edge_function(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i32 {
 //     (px - ax) * (by - ay) - (py - ay) * (bx - ax)
@@ -228,8 +229,16 @@ fn main() {
     let pixel_position = IntVec2::from(&point);
     let fragment = Fragment{position:pixel_position, depth: 0.0, colour: 0xFF0000};
     write_fragment(&mut colour_buffer, &mut depth_buffer, fragment);
-    // draw_line(&mut buffer, 100, 100, 500, 300, 0x00FF00);
-    // draw_line(&mut buffer, 100, 300, 500, 100, 0x00FF00);
+    
+    let pixel_1 = IntVec2{x: 100, y: 100};
+    let pixel_2 = IntVec2{x: 500, y: 300};
+    let pixel_3 = IntVec2{x: 100, y: 300};
+    let pixel_4 = IntVec2{x: 500, y: 100};
+    let colour = 0x00FF00;
+    
+    draw_line(&mut colour_buffer, &mut depth_buffer, pixel_1, pixel_2, 0.0, colour);
+    draw_line(&mut colour_buffer, &mut depth_buffer, pixel_3, pixel_4, 0.0, colour);
+    
     // draw_filled_triangle(
     // 	&mut buffer,
     // 	(200, 100),
