@@ -62,22 +62,33 @@ fn draw_line(
     colour_buffer: &mut [u32],
     depth_buffer: &mut [f32],
     v0: IntVec2,
+    z0: f32,
     v1: IntVec2,
-    depth: f32,
+    z1: f32,
     colour: u32,
 ) {
     let dx = (v1.x - v0.x).abs();
-    let dy = -(v1.y - v0.y).abs();
+    let dy = (v1.y - v0.y).abs();
 
-    // Parameterise the path
     let sx = if v0.x < v1.x { 1 } else { -1 };
     let sy = if v0.y < v1.y { 1 } else { -1 };
 
-    let mut err = dx + dy;
-    let mut v = IntVec2{x: v0.x, y: v0.y};
+    let mut err = dx - dy;
+
+    let steps = dx.max(dy).max(1) as f32;
+    let mut t = 0.0;
+    let dt = 1.0 / steps;
+
+    let mut v = v0;
 
     loop {
-	let fragment = Fragment{position: v, depth: depth, colour: colour};
+        let depth = (1.0 - t) * z0 + t * z1;
+
+        let fragment = Fragment {
+            position: v,
+            depth,
+            colour,
+        };
         write_fragment(colour_buffer, depth_buffer, fragment);
 
         if v.x == v1.x && v.y == v1.y {
@@ -86,79 +97,88 @@ fn draw_line(
 
         let e2 = 2 * err;
 
-        if e2 >= dy {
-            err += dy;
+        if e2 > -dy {
+            err -= dy;
             v.x += sx;
         }
 
-        if e2 <= dx {
+        if e2 < dx {
             err += dx;
             v.y += sy;
+        }
+
+        t += dt;
+    }
+}
+
+fn edge_function(
+    v0: IntVec2,
+    v1: IntVec2,
+    v2: IntVec2,
+) -> i32 {
+    (v2.x - v0.x) * (v1.y - v0.y) - (v2.y - v0.y) * (v1.x - v0.x)
+}
+
+fn barycentric(
+    v0: IntVec2,
+    v1: IntVec2,
+    v2: IntVec2,
+    position: IntVec2,
+) -> (f32, f32, f32) {
+    let area = edge_function(v0, v1, v2) as f32;
+
+    let w0 = edge_function(v1, v2, position) as f32 / area;
+    let w1 = edge_function(v2, v0, position) as f32 / area;
+    let w2 = edge_function(v0, v1, position) as f32 / area;
+
+    (w0, w1, w2)
+}
+
+fn draw_filled_triangle(
+    colour_buffer: &mut [u32],
+    depth_buffer: &mut [f32],
+    v0: IntVec2,
+    z0: f32,
+    v1: IntVec2,
+    z1: f32,
+    v2: IntVec2,
+    z2: f32,
+    colour: u32,
+) {
+    let min_x = v0.x.min(v1.x).min(v2.x).max(0);
+    let max_x = v0.x.max(v1.x).max(v2.x).min(WIDTH as i32 - 1);
+    let min_y = v0.y.min(v1.y).min(v2.y).max(0);
+    let max_y = v0.y.max(v1.y).max(v2.y).min(HEIGHT as i32 - 1);
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+	    let position = IntVec2{x, y};
+	    
+	    let (w0, w1, w2) = barycentric(v0, v1, v2, position);
+	    
+	    if (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0)
+		|| (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0) {
+		    let depth = w0 * z0 + w1 * z1 + w2 * z2;
+		    let fragment = Fragment{position, depth, colour};
+                    write_fragment(colour_buffer, depth_buffer, fragment);
+		}
         }
     }
 }
 
-// fn edge_function(ax: i32, ay: i32, bx: i32, by: i32, px: i32, py: i32) -> i32 {
-//     (px - ax) * (by - ay) - (py - ay) * (bx - ax)
-// }
+fn unpack_color(colour: u32) -> (f32, f32, f32) {
+    let red = ((colour >> 16) & 0xFF) as f32;
+    let green = ((colour >> 8) & 0xFF) as f32;
+    let blue = (colour & 0xFF) as f32;
+    (red, green, blue)
+}
 
-// fn draw_filled_triangle(
-//     buffer: &mut [u32],
-//     v0: (i32, i32),
-//     v1: (i32, i32),
-//     v2: (i32, i32),
-//     colour: u32,
-// ) {
-//     let (x0, y0) = v0;
-//     let (x1, y1) = v1;
-//     let (x2, y2) = v2;
-
-//     let min_x = x0.min(x1).min(x2).max(0);
-//     let max_x = x0.max(x1).max(x2).min(WIDTH as i32 - 1);
-//     let min_y = y0.min(y1).min(y2).max(0);
-//     let max_y = y0.max(y1).max(y2).min(HEIGHT as i32 - 1);
-
-//     for y in min_y..=max_y {
-//         for x in min_x..=max_x {
-//             let w0 = edge_function(x1, y1, x2, y2, x, y);
-//             let w1 = edge_function(x2, y2, x0, y0, x, y);
-//             let w2 = edge_function(x0, y0, x1, y1, x, y);
-
-//             if w0 >= 0 && w1 >= 0 && w2 >= 0 {
-//                 set_pixel(buffer, x, y, colour);
-//             }
-//         }
-//     }
-// }
-
-// fn barycentric(
-//     v0: (i32, i32),
-//     v1: (i32, i32),
-//     v2: (i32, i32),
-//     p: (i32, i32),
-// ) -> (f32, f32, f32) {
-//     let area = edge_function(v0.0, v0.1, v1.0, v1.1, v2.0, v2.1) as f32;
-
-//     let w0 = edge_function(v1.0, v1.1, v2.0, v2.1, p.0, p.1) as f32 / area;
-//     let w1 = edge_function(v2.0, v2.1, v0.0, v0.1, p.0, p.1) as f32 / area;
-//     let w2 = edge_function(v0.0, v0.1, v1.0, v1.1, p.0, p.1) as f32 / area;
-
-//     (w0, w1, w2)
-// }
-
-// fn unpack_color(c: u32) -> (f32, f32, f32) {
-//     let r = ((c >> 16) & 0xFF) as f32;
-//     let g = ((c >> 8) & 0xFF) as f32;
-//     let b = (c & 0xFF) as f32;
-//     (r, g, b)
-// }
-
-// fn pack_color(r: f32, g: f32, b: f32) -> u32 {
-//     let r = r.clamp(0.0, 255.0) as u32;
-//     let g = g.clamp(0.0, 255.0) as u32;
-//     let b = b.clamp(0.0, 255.0) as u32;
-//     (r << 16) | (g << 8) | b
-// }
+fn pack_color(red: f32, green: f32, blue: f32) -> u32 {
+    let red = red.clamp(0.0, 255.0) as u32;
+    let green = green.clamp(0.0, 255.0) as u32;
+    let blue = blue.clamp(0.0, 255.0) as u32;
+    (red << 16) | (green << 8) | blue
+}
 
 // fn draw_interpolated_triangle(
 //     buffer: &mut [u32],
@@ -236,16 +256,40 @@ fn main() {
     let pixel_4 = IntVec2{x: 500, y: 100};
     let colour = 0x00FF00;
     
-    draw_line(&mut colour_buffer, &mut depth_buffer, pixel_1, pixel_2, 0.0, colour);
-    draw_line(&mut colour_buffer, &mut depth_buffer, pixel_3, pixel_4, 0.0, colour);
+    draw_line(
+	&mut colour_buffer,
+	&mut depth_buffer,
+	pixel_1,
+	0.1,
+	pixel_2,
+	0.5,
+	colour);
+    draw_line(
+	&mut colour_buffer,
+	&mut depth_buffer,
+	pixel_3,
+	0.0,
+	pixel_4,
+	0.5,
+	colour);
+
+    let pixel_5 = IntVec2{x: 200, y: 100};
+    let pixel_6 = IntVec2{x: 300, y: 350};
+    let pixel_7 = IntVec2{x: 400, y: 150};
+    let colour_2 = 0x00CC0;
     
-    // draw_filled_triangle(
-    // 	&mut buffer,
-    // 	(200, 100),
-    // 	(300, 350),
-    // 	(400, 150),
-    // 	0x0080FF,
-    // );
+    draw_filled_triangle(
+	&mut colour_buffer,
+	&mut depth_buffer,
+	pixel_5,
+	0.0,
+	pixel_6,
+	0.0,
+	pixel_7,
+	1.0,
+	colour_2,
+    );
+    
     // draw_interpolated_triangle(
     // 	&mut buffer,
     // 	(20, 100),
